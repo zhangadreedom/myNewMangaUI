@@ -1,0 +1,16 @@
+{
+  "server": {
+    "address": ":8080"
+  },
+  "database": {
+    "path": "./data/app.db"
+  },
+  "storage": {
+    "libraryRoots": [
+      "D:/Comics",
+      "\\\\NAS\\Manga"
+    ],
+    "cachePath": "./cache/thumbs"
+  },
+  "logLevel": "info"
+}
