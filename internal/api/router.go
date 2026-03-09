@@ -21,7 +21,6 @@ type Dependencies struct {
 
 func NewRouter(deps Dependencies) http.Handler {
 	r := chi.NewRouter()
-	library := newLibraryHandler(deps.DB)
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -30,7 +29,6 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Use(requestLogger(deps.Logger))
 
 	r.Get("/health", healthHandler)
-	r.Get("/api/library", library.getLibrary)
 
 	return r
 }

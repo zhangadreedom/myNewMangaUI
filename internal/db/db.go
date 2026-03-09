@@ -17,9 +17,6 @@ import (
 var migrationFS embed.FS
 
 func OpenAndMigrate(ctx context.Context, dsn string, logger *slog.Logger) (*sql.DB, error) {
-	if logger == nil {
-		logger = slog.Default()
-	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -52,7 +49,6 @@ func applyPragmas(ctx context.Context, db *sql.DB) error {
 		"PRAGMA synchronous = NORMAL;",
 		"PRAGMA foreign_keys = ON;",
 		"PRAGMA temp_store = MEMORY;",
-		"PRAGMA busy_timeout = 5000;",
 	}
 	for _, stmt := range pragmas {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {

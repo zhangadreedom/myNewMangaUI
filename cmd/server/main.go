@@ -15,7 +15,6 @@ import (
 	"mynewmangaui/internal/api"
 	"mynewmangaui/internal/config"
 	"mynewmangaui/internal/db"
-	"mynewmangaui/internal/scan"
 )
 
 func main() {
@@ -43,11 +42,6 @@ func main() {
 		os.Exit(1)
 	}
 	defer database.Close()
-
-	scanService := scan.NewService(logger, database, cfg)
-	scanCtx, scanCancel := context.WithCancel(context.Background())
-	defer scanCancel()
-	scanService.StartBackground(scanCtx)
 
 	handler := api.NewRouter(api.Dependencies{
 		Logger: logger,
@@ -79,8 +73,6 @@ func main() {
 			os.Exit(1)
 		}
 	}
-
-	scanCancel()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
