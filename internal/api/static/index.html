@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>漫画书库</title>
+    <script>
+      (() => {
+        try {
+          const theme = window.localStorage.getItem("mynewmangaui.theme");
+          if (theme === "dark") {
+            document.documentElement.dataset.theme = "dark";
+          }
+        } catch (error) {
+          console.warn("failed to restore theme", error);
+        }
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css?v=20260425j" />
+  </head>
+  <body>
+    <button id="theme-toggle" class="ghost-button theme-toggle theme-toggle--floating" type="button" aria-label="切换黑暗模式" title="切换黑暗模式">
+      <span class="theme-toggle__icon" data-theme-icon>☾</span>
+      <span data-theme-label>暗色</span>
+    </button>
+    <div class="page-shell">
+      <header class="hero">
+        <div class="hero__topline">
+          <div>
+            <div class="hero__badge">My New Manga UI</div>
+            <h1>漫画书库</h1>
+          </div>
+          <div class="hero__actions">
+            <button id="home-button" class="ghost-button" type="button">书架</button>
+            <button id="online-button" class="ghost-button" type="button" hidden>在线</button>
+            <button id="downloads-button" class="ghost-button" type="button">下载</button>
+            <button id="manage-button" class="ghost-button" type="button">管理</button>
+            <button id="scan-button" class="ghost-button" type="button">重新扫描</button>
+          </div>
+        </div>
+
+        <div class="hero__meta">
+          <div class="stat-card">
+            <span class="stat-card__label">Manga</span>
+            <strong id="manga-count">-</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">Bookshelf</span>
+            <strong id="current-bookshelf">全部书架</strong>
+          </div>
+          <div class="stat-card">
+            <span class="stat-card__label">Latest Update</span>
+            <strong id="latest-update">加载中</strong>
+          </div>
+        </div>
+      </header>
+
+      <main class="layout-grid">
+        <section class="panel panel--main">
+          <div class="panel__header">
+            <div class="panel__title-block">
+              <p class="panel__eyebrow" id="eyebrow">Library</p>
+              <div class="panel__title-row">
+                <span class="panel__title-prefix">书架:</span>
+                <h2 id="view-title">漫画书库</h2>
+                <button id="refresh-button" class="ghost-button" type="button">刷新</button>
+              </div>
+            </div>
+            <div class="toolbar" id="view-toolbar">
+              <div id="toolbar-extra" class="toolbar__extra"></div>
+            </div>
+          </div>
+
+          <div id="feedback" class="feedback">正在加载...</div>
+          <section id="app-view" class="view-region" aria-live="polite"></section>
+        </section>
+
+        <aside class="panel panel--side">
+          <p class="panel__eyebrow">Overview</p>
+          <h2>当前前端能力</h2>
+          <ul class="feature-list">
+            <li>书架页展示封面、章节数、页数和更新时间</li>
+            <li>漫画详情页展示章节列表</li>
+            <li>阅读页按页渲染图片</li>
+            <li>支持手动触发重新扫描</li>
+          </ul>
+        </aside>
+      </main>
+    </div>
+
+    <script src="/app.js?v=20260425j" defer></script>
+  </body>
+</html>

@@ -1,0 +1,31 @@
+# Local runtime data
+/data/
+/cache/
+/local/
+
+# Local configuration
+/config.json
+/config.bookshelves.json
+/.env
+/.env.*
+
+# Build outputs and generated binaries
+/bin/
+/*.exe
+/*.dll
+/*.so
+/*.dylib
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+
+# Backups and scratch space
+/backups/
+/tmp/
+/tmp_jm/
+
+# Go test/build artifacts
+coverage.out
+*.test

@@ -1,16 +1,57 @@
-{
+﻿{
   "server": {
-    "address": ":8080"
+    "address": ":8080",
+    "allowPrivateNetworks": true,
+    "publicAccessToken": "change-this-public-token",
+    "trustedProxyCIDRs": [
+      "127.0.0.1/32",
+      "::1/128"
+    ]
   },
   "database": {
     "path": "./data/app.db"
   },
   "storage": {
-    "libraryRoots": [
-      "D:/Comics",
-      "\\\\NAS\\Manga"
+    "bookshelves": [
+      {
+        "name": "鏃ユ极",
+        "path": "F:/YourLibrary/鏃ユ极"
+      },
+      {
+        "name": "闊╂极",
+        "path": "F:/YourLibrary/闊╂极"
+      }
     ],
     "cachePath": "./cache/thumbs"
+  },
+  "online": {
+    "enabled": false,
+    "cachePath": "./cache/online",
+    "downloadsPath": "./data/downloads",
+    "requestTimeoutSeconds": 20,
+    "imageProxyTtlSeconds": 3600,
+    "sources": [
+      {
+        "id": "18comic",
+        "name": "18comic",
+        "baseURL": "https://18comic.vip",
+        "enabled": false,
+        "proxyURL": "http://127.0.0.1:10087",
+        "username": "",
+        "password": "",
+        "sessionCookie": "",
+        "cookieHeader": "",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+        "maxConcurrentRequests": 3,
+        "requestIntervalMs": 800,
+        "defaultDisplay": {
+          "mode": "latest",
+          "title": "鏈€鏂版极鐢?,
+          "description": "榛樿灞曠ず鏉ユ簮鏈€鏂版洿鏂扮殑鍦ㄧ嚎婕敾銆?,
+          "limit": 30
+        }
+      }
+    ]
   },
   "logLevel": "info"
 }
