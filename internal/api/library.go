@@ -252,7 +252,7 @@ func (h *libraryHandler) getBookshelves(w http.ResponseWriter, r *http.Request) 
 	for _, shelf := range h.bookshelves {
 		key := normalizeBookshelfPath(shelf.Path)
 		if item, ok := byPath[key]; ok {
-			if strings.TrimSpace(item.Name) == "" {
+			if strings.TrimSpace(shelf.Name) != "" {
 				item.Name = shelf.Name
 			}
 			merged = append(merged, item)

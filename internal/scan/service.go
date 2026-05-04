@@ -119,8 +119,8 @@ type directoryMetadataChapter struct {
 	Directory string `json:"directory"`
 }
 
-var chapterNumberPattern = regexp.MustCompile(`(?i)绗琝s*(\d+(?:\.\d+)?)`)
-var duplicateChapterPattern = regexp.MustCompile(`^(绗琝s*0*(\d+(?:\.\d+)?)\s*[璇濊┍鍗穄)(?:\s+[绗琞\s*0*(\d+(?:\.\d+)?)\s*[璇濊┍鍗穄)+$`)
+var chapterNumberPattern = regexp.MustCompile("(?i)(?:\u7b2c\\s*)?0*(\\d+(?:\\.\\d+)?)\\s*(?:\u8bdd|\u8a71|\u7ae0|\u5377|ch|chapter)?")
+var duplicateChapterPattern = regexp.MustCompile("^((?:\u7b2c\\s*)?0*(\\d+(?:\\.\\d+)?)\\s*(?:\u8bdd|\u8a71|\u7ae0|\u5377))(?:\\s+(?:\u7b2c\\s*)?0*(\\d+(?:\\.\\d+)?)\\s*(?:\u8bdd|\u8a71|\u7ae0|\u5377))+$")
 
 func NewService(db *sql.DB, bookshelves []Bookshelf, logger *slog.Logger) *Service {
 	return &Service{db: db, bookshelves: bookshelves, logger: logger}
@@ -1345,7 +1345,7 @@ func (s *Service) replaceBookshelfManga(ctx context.Context, shelf bookshelfReco
 		return err
 	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM manga WHERE bookshelf_id = ?`, shelf.ID); err != nil {
+	if err := clearBookshelfManga(ctx, tx, shelf.ID); err != nil {
 		tx.Rollback()
 		return fmt.Errorf("clear bookshelf %q: %w", shelf.Name, err)
 	}
@@ -1372,6 +1372,47 @@ func (s *Service) replaceBookshelfManga(ctx context.Context, shelf bookshelfReco
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit bookshelf %q: %w", shelf.Name, err)
+	}
+	return nil
+}
+
+func clearBookshelfManga(ctx context.Context, tx *sql.Tx, bookshelfID string) error {
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM page
+		WHERE chapter_id IN (
+			SELECT c.id
+			FROM chapter c
+			JOIN manga m ON m.id = c.manga_id
+			WHERE m.bookshelf_id = ?
+		)
+	`, bookshelfID); err != nil {
+		return fmt.Errorf("clear bookshelf pages: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM chapter
+		WHERE manga_id IN (
+			SELECT id
+			FROM manga
+			WHERE bookshelf_id = ?
+		)
+	`, bookshelfID); err != nil {
+		return fmt.Errorf("clear bookshelf chapters: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM manga_tag
+		WHERE manga_id IN (
+			SELECT id
+			FROM manga
+			WHERE bookshelf_id = ?
+		)
+	`, bookshelfID); err != nil {
+		return fmt.Errorf("clear bookshelf tags: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM manga WHERE bookshelf_id = ?`, bookshelfID); err != nil {
+		return fmt.Errorf("clear bookshelf manga: %w", err)
 	}
 	return nil
 }

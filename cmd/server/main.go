@@ -67,11 +67,14 @@ func main() {
 			}
 
 			shelfPath := filepath.Join(cfg.Online.DownloadsPath, source.ID)
+			if abs, err := filepath.Abs(shelfPath); err == nil {
+				shelfPath = abs
+			}
 			if hasBookshelfPath(bookshelves, shelfPath) {
 				continue
 			}
 
-			shelfName := "\u5728\u7ebf\u4e0b\u8f7d"
+			shelfName := "\u5728\u7ebf\u6f2b\u753b"
 			if name := strings.TrimSpace(source.Name); name != "" {
 				shelfName += " \u00b7 " + name
 			}
@@ -83,10 +86,14 @@ func main() {
 			addedOnlineShelf = true
 		}
 
-		if !addedOnlineShelf && !hasBookshelfPath(bookshelves, cfg.Online.DownloadsPath) {
+		downloadsPath := cfg.Online.DownloadsPath
+		if abs, err := filepath.Abs(downloadsPath); err == nil {
+			downloadsPath = abs
+		}
+		if !addedOnlineShelf && !hasBookshelfPath(bookshelves, downloadsPath) {
 			bookshelves = append(bookshelves, scansvc.Bookshelf{
-				Name: "\u5728\u7ebf\u4e0b\u8f7d",
-				Path: cfg.Online.DownloadsPath,
+				Name: "\u5728\u7ebf\u6f2b\u753b",
+				Path: downloadsPath,
 			})
 		}
 	}
@@ -99,12 +106,14 @@ func main() {
 		os.Exit(1)
 	}
 	onlineCache := onlinesvc.NewCacheService(database, online, logger)
-	onlineCache.StartBackgroundRefresh(rootCtx, 30*time.Minute)
+	onlineCache.StartBackgroundRefreshWindow(rootCtx, 5*time.Minute, 10*time.Minute)
 	downloads := downloadsvc.NewService(database, online, scanner, cfg.Online.DownloadsPath, logger)
+	routerConfig := cfg
+	routerConfig.Storage.Bookshelves = bookshelfConfigs(bookshelves)
 
 	handler := api.NewRouter(api.Dependencies{
 		Logger:      logger,
-		Config:      cfg,
+		Config:      routerConfig,
 		DB:          database,
 		Scanner:     scanner,
 		Images:      images,
@@ -211,4 +220,15 @@ func hasBookshelfPath(bookshelves []scansvc.Bookshelf, target string) bool {
 		}
 	}
 	return false
+}
+
+func bookshelfConfigs(bookshelves []scansvc.Bookshelf) []config.BookshelfConfig {
+	configs := make([]config.BookshelfConfig, 0, len(bookshelves))
+	for _, shelf := range bookshelves {
+		configs = append(configs, config.BookshelfConfig{
+			Name: shelf.Name,
+			Path: shelf.Path,
+		})
+	}
+	return configs
 }

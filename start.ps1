@@ -1,15 +1,19 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$exe = Join-Path $root "bin\\mynewmangaui.exe"
 $config = Join-Path $root "config.bookshelves.json"
 
-if (-not (Test-Path $exe)) {
-  throw "Missing executable: $exe"
+if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+  throw "Go executable was not found in PATH"
 }
 
-Get-Process mynewmangaui -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Process -FilePath $exe -ArgumentList "-config", $config -WorkingDirectory $root
+if (-not (Test-Path $config)) {
+  throw "Missing config: $config"
+}
 
-Write-Host "Started:" $exe
+Get-Process server,mynewmangaui -ErrorAction SilentlyContinue | Stop-Process -Force
+
+Set-Location $root
+Write-Host "Starting: go run ./cmd/server"
 Write-Host "Config:" $config
+& go run ./cmd/server -config $config

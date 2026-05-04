@@ -107,6 +107,8 @@ body {
   display: flex;
   gap: 12px;
   align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .theme-toggle {
@@ -459,9 +461,25 @@ body {
   background: rgba(255, 239, 224, 0.12);
 }
 
+:root[data-theme="dark"] .ghost-button.is-active,
+:root[data-theme="dark"] .ghost-button[aria-pressed="true"],
+:root[data-theme="dark"] .manga-update-badge {
+  border-color: rgba(224, 135, 92, 0.22);
+  background: rgba(224, 135, 92, 0.18);
+  color: var(--accent-deep);
+}
+
 .ghost-button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.ghost-button.is-active,
+.ghost-button[aria-pressed="true"] {
+  border-color: rgba(126, 47, 25, 0.32);
+  background: linear-gradient(180deg, #ffe0cc, #fff3e8);
+  color: var(--accent-deep);
+  box-shadow: 0 10px 22px rgba(78, 45, 26, 0.1);
 }
 
 .feedback {
@@ -877,6 +895,21 @@ body[data-route="downloads"] .panel--main {
   gap: 12px;
 }
 
+.download-job-card__title {
+  min-width: 0;
+  color: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.35;
+  text-decoration: none;
+}
+
+.download-job-card__title:hover {
+  color: var(--accent-deep);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .download-job-card__heading span {
   flex: 0 0 auto;
   color: var(--muted);
@@ -1012,6 +1045,17 @@ body[data-route="onlineLibrary"] .panel--main {
   display: block;
 }
 
+.manga-tile__cover-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: rgba(96, 58, 44, 0.58);
+  font-size: 48px;
+  font-weight: 800;
+  background: linear-gradient(180deg, #f5e1d2, #e6c9b5);
+}
+
 .manga-tile__body {
   padding: 18px;
 }
@@ -1019,6 +1063,77 @@ body[data-route="onlineLibrary"] .panel--main {
 .manga-tile--online .manga-tile__body {
   display: grid;
   gap: 10px;
+}
+
+.online-tag-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+  margin: 0;
+}
+
+.online-tag-list__item {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f9eadf;
+  color: var(--accent-deep);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-author {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.online-author span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(122, 47, 28, 0.08);
+  color: var(--accent-deep);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.online-author strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-author--detail {
+  display: inline-grid;
+  max-width: min(100%, 48rem);
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(122, 47, 28, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 249, 244, 0.72);
+}
+
+.online-author--detail span {
+  padding: 4px 8px;
+}
+
+.online-author--detail strong {
+  font-size: 14px;
 }
 
 .manga-tile__quick-actions {
@@ -1636,8 +1751,52 @@ body[data-route="manga"] .chapter-row__link {
   background: rgba(255, 250, 242, 0.86);
 }
 
-.download-job-card__main strong {
+.manga-update-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(190, 90, 53, 0.14);
+  color: var(--accent-deep);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.download-job-card__content {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.download-job-card__cover {
+  width: 72px;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border: 1px solid rgba(122, 47, 28, 0.12);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, rgba(190, 90, 53, 0.16), rgba(255, 250, 242, 0.82));
+}
+
+.download-job-card__cover img {
   display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.download-job-card__cover span {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: var(--accent-deep);
+  font-size: 1.7rem;
+  font-weight: 800;
 }
 
 .download-job-card__main p {
@@ -1687,6 +1846,12 @@ body[data-route="manga"] .chapter-row__link {
 
 :root[data-theme="dark"] .download-job-card__error {
   color: #f5a082;
+}
+
+:root[data-theme="dark"] .download-job-card__cover {
+  border-color: rgba(255, 239, 224, 0.14);
+  background:
+    linear-gradient(135deg, rgba(224, 135, 92, 0.16), rgba(36, 31, 27, 0.82));
 }
 
 .reader-shell {
@@ -2172,6 +2337,20 @@ body[data-route="chapter"] .reader-shell {
   .toolbar {
     margin-top: 16px;
     flex-wrap: wrap;
+  }
+
+  .hero__actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .hero__actions .ghost-button {
+    min-width: 0;
+    min-height: 40px;
+    padding: 9px 10px;
+    text-align: center;
   }
 
   .hero__meta {
@@ -2773,6 +2952,19 @@ body[data-route="chapter"] .reader-toolbar__icon {
   background: #181614;
 }
 
+:root[data-theme="dark"] .online-author span {
+  background: rgba(224, 135, 92, 0.16);
+}
+
+:root[data-theme="dark"] .online-author strong {
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .online-author--detail {
+  border-color: rgba(224, 135, 92, 0.18);
+  background: rgba(31, 27, 24, 0.68);
+}
+
 @media (max-width: 960px) {
   .download-job-card {
     grid-template-columns: 1fr;
@@ -2784,6 +2976,15 @@ body[data-route="chapter"] .reader-toolbar__icon {
 }
 
 @media (max-width: 560px) {
+  .download-job-card__content {
+    grid-template-columns: 58px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .download-job-card__cover {
+    width: 58px;
+  }
+
   .download-job-card__actions {
     grid-template-columns: 1fr;
   }
@@ -2796,6 +2997,7 @@ body[data-route="chapter"] .reader-toolbar__icon {
 :root[data-theme="dark"] .management-tab.is-active,
 :root[data-theme="dark"] .chapter-row__index,
 :root[data-theme="dark"] body[data-route="manga"] .chapters-panel__count,
+:root[data-theme="dark"] .online-tag-list__item,
 :root[data-theme="dark"] .manga-metrics span,
 :root[data-theme="dark"] .reader-pill.is-active {
   background: rgba(224, 135, 92, 0.2);

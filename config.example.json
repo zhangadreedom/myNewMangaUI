@@ -46,8 +46,45 @@
         "requestIntervalMs": 800,
         "defaultDisplay": {
           "mode": "latest",
-          "title": "鏈€鏂版极鐢?,
-          "description": "榛樿灞曠ず鏉ユ簮鏈€鏂版洿鏂扮殑鍦ㄧ嚎婕敾銆?,
+          "title": "\u6700\u65b0\u6f2b\u753b",
+          "description": "\u9ed8\u8ba4\u5c55\u793a\u6765\u6e90\u6700\u65b0\u66f4\u65b0\u7684\u5728\u7ebf\u6f2b\u753b\u3002",
+          "limit": 30
+        }
+      },
+      {
+        "id": "ehentai",
+        "name": "Ehentai",
+        "baseURL": "https://e-hentai.org",
+        "enabled": false,
+        "proxyURL": "http://127.0.0.1:10087",
+        "cookieHeader": "",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+        "maxConcurrentRequests": 3,
+        "requestIntervalMs": 800,
+        "defaultDisplay": {
+          "mode": "latest",
+          "title": "Ehentai \u6700\u65b0\u753b\u5eca",
+          "description": "\u9ed8\u8ba4\u5c55\u793a Ehentai \u6700\u65b0\u66f4\u65b0\u7684\u753b\u5eca\u3002",
+          "limit": 30
+        }
+      },
+      {
+        "id": "pica",
+        "name": "Pica",
+        "baseURL": "https://picaapi.picacomic.com",
+        "enabled": false,
+        "proxyURL": "http://127.0.0.1:10087",
+        "username": "",
+        "password": "",
+        "sessionCookie": "",
+        "cookieHeader": "",
+        "userAgent": "okhttp/3.8.1",
+        "maxConcurrentRequests": 3,
+        "requestIntervalMs": 800,
+        "defaultDisplay": {
+          "mode": "latest",
+          "title": "Pica \u6700\u65b0\u6f2b\u753b",
+          "description": "\u9ed8\u8ba4\u5c55\u793a Pica \u6700\u65b0\u66f4\u65b0\u7684\u5728\u7ebf\u6f2b\u753b\u3002",
           "limit": 30
         }
       }

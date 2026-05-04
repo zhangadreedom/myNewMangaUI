@@ -77,7 +77,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Post("/api/online/{sourceID}/default/refresh", online.refreshDefaultFeed)
 	r.Get("/api/online/{sourceID}/search", online.search)
 	r.Put("/api/online/{sourceID}/settings", online.updateSettings)
+	r.Get("/api/online/{sourceID}/bookmarks", online.listBookmarks)
 	r.Get("/api/online/{sourceID}/manga/{mangaID}", online.getManga)
+	r.Put("/api/online/{sourceID}/manga/{mangaID}/bookmark", online.updateBookmark)
 	r.Post("/api/online/{sourceID}/manga/{mangaID}/block", online.blockManga)
 	r.Get("/api/online/{sourceID}/manga/{mangaID}/chapters", online.getChapters)
 	r.Get("/api/online/{sourceID}/chapters/{chapterID}/pages", online.getPages)
@@ -97,9 +99,16 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Post("/api/tasks/scan/bookshelf/{bookshelfID}", scan.triggerBookshelfScan)
 	r.Post("/api/tasks/scan/manga/{mangaID}", scan.triggerMangaScan)
 	r.Post("/api/tasks/scan/tag/{tagID}", scan.triggerTagScan)
-	r.Handle("/*", http.FileServer(http.FS(staticFS)))
+	r.Handle("/*", noStoreStatic(http.FileServer(http.FS(staticFS))))
 
 	return r
+}
+
+func noStoreStatic(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func mustStaticFS() fs.FS {
@@ -135,7 +144,7 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
 }

@@ -20,6 +20,7 @@
 *.log
 *.tmp
 *.bak
+/.tmp.driveupload/
 
 # Backups and scratch space
 /backups/
@@ -29,3 +30,4 @@
 # Go test/build artifacts
 coverage.out
 *.test
+/.gocache/

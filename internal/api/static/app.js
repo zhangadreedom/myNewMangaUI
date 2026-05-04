@@ -1,4 +1,4 @@
-﻿const appViewEl = document.getElementById("app-view");
+const appViewEl = document.getElementById("app-view");
 const feedbackEl = document.getElementById("feedback");
 const mangaCountEl = document.getElementById("manga-count");
 const currentBookshelfEl = document.getElementById("current-bookshelf");
@@ -7,6 +7,8 @@ const refreshButton = document.getElementById("refresh-button");
 const scanButton = document.getElementById("scan-button");
 const homeButton = document.getElementById("home-button");
 const onlineButton = document.getElementById("online-button");
+const favoritesButton = ensureHeroActionButton("favorites-button", "收藏", onlineButton);
+const followingButton = ensureHeroActionButton("following-button", "追漫", favoritesButton);
 const downloadsButton = document.getElementById("downloads-button");
 const manageButton = document.getElementById("manage-button");
 const themeToggleButton = document.getElementById("theme-toggle");
@@ -20,6 +22,26 @@ const themeStorageKey = "mynewmangaui.theme";
 const onlineReturnRouteStorageKey = "mynewmangaui.onlineReturnRoute";
 const nextChapterImagePreloadCount = 4;
 const nextChapterAutoAdvanceDelayMs = 1000;
+
+function ensureHeroActionButton(id, label, afterNode) {
+  let button = document.getElementById(id);
+  if (button) {
+    return button;
+  }
+  button = document.createElement("button");
+  button.id = id;
+  button.className = "ghost-button";
+  button.type = "button";
+  button.hidden = true;
+  button.textContent = label;
+  const parent = afterNode?.parentElement || document.querySelector(".hero__actions");
+  if (parent && afterNode?.parentElement === parent) {
+    afterNode.insertAdjacentElement("afterend", button);
+  } else {
+    parent?.appendChild(button);
+  }
+  return button;
+}
 
 const state = {
   health: null,
@@ -56,6 +78,7 @@ const state = {
     mangaByKey: new Map(),
     chaptersByKey: new Map(),
     pagesByKey: new Map(),
+    bookmarksByKind: new Map(),
     downloads: null,
     downloadsPollTimer: null,
     pendingCreateKeys: new Set(),
@@ -64,6 +87,7 @@ const state = {
     downloadStatusFilter: "all",
     downloadSourceFilter: "all",
     downloadSort: "updated-desc",
+    bookmarkKind: "favorite",
     returnRoute: "",
   },
   reader: {
@@ -163,7 +187,9 @@ function applyRouteLayout(routeName) {
     ? "manga"
     : routeName === "onlineChapter"
       ? "chapter"
-      : routeName;
+      : routeName === "onlineBookmarks"
+        ? "onlineLibrary"
+        : routeName;
   document.body.dataset.route = normalizedRoute;
   document.body.dataset.routeName = routeName;
 }
@@ -181,6 +207,12 @@ function getRoute() {
   }
   if (parts[0] === "online") {
     const sourceId = decodeURIComponent(parts[1] || state.online.currentSourceId || "18comic");
+    if (parts[2] === "favorites") {
+      return { name: "onlineBookmarks", sourceId, kind: "favorite" };
+    }
+    if (parts[2] === "following") {
+      return { name: "onlineBookmarks", sourceId, kind: "follow" };
+    }
     if (parts[2] === "manga" && parts[3]) {
       return { name: "onlineManga", sourceId, mangaId: decodeURIComponent(parts[3]) };
     }
@@ -227,6 +259,10 @@ function routeForOnlineLibrary(sourceId = state.online.currentSourceId || "18com
   return `#/online/${encodeURIComponent(sourceId)}`;
 }
 
+function routeForOnlineBookmarks(kind = "favorite", sourceId = state.online.currentSourceId || "18comic") {
+  return `#/online/${encodeURIComponent(sourceId)}/${kind === "follow" ? "following" : "favorites"}`;
+}
+
 function routeForManga(manga) {
   if (manga?.sourceId) {
     return `#/online/${encodeURIComponent(manga.sourceId)}/manga/${encodeURIComponent(manga.id)}`;
@@ -253,10 +289,35 @@ function buildOnlineImageProxyURL(sourceId, remoteURL) {
   return `/api/online/${encodeURIComponent(sourceId)}/image?target=${encoded}`;
 }
 
+function renderOnlineCover(item) {
+  const proxyURL = buildOnlineImageProxyURL(item?.sourceId, item?.coverUrl || "");
+  if (proxyURL) {
+    return `<img src="${escapeHTML(proxyURL)}" alt="${escapeHTML(item?.title || "")}" loading="lazy" />`;
+  }
+  const label = String(item?.title || "?").trim().slice(0, 1).toUpperCase() || "?";
+  return `<div class="manga-tile__cover-placeholder" aria-hidden="true">${escapeHTML(label)}</div>`;
+}
+
 async function fetchJSON(url, options) {
   const response = await fetch(url, options);
   if (!response.ok) {
-    throw new Error(`Request failed with status ${response.status}`);
+    let message = `Request failed with status ${response.status}`;
+    try {
+      const payload = await response.json();
+      if (payload?.error) {
+        message = payload.error;
+      }
+    } catch (error) {
+      try {
+        const text = await response.text();
+        if (text.trim()) {
+          message = text.trim();
+        }
+      } catch (textError) {
+        console.warn("failed to read error response", textError);
+      }
+    }
+    throw new Error(message);
   }
   return response.json();
 }
@@ -448,7 +509,13 @@ function scheduleScanStatusPoll(delay = 3000) {
 function updateHero() {
   const route = getRoute();
   if (onlineButton) {
-    onlineButton.hidden = !["onlineLibrary", "onlineManga", "onlineChapter"].includes(route.name);
+    onlineButton.hidden = false;
+  }
+  if (favoritesButton) {
+    favoritesButton.hidden = false;
+  }
+  if (followingButton) {
+    followingButton.hidden = false;
   }
   if (route.name === "downloads") {
     const jobs = state.online.downloads?.items || [];
@@ -459,9 +526,20 @@ function updateHero() {
     scanButton.disabled = true;
     return;
   }
-  if (route.name === "onlineLibrary" || route.name === "onlineManga" || route.name === "onlineChapter") {
+  if (route.name === "onlineLibrary" || route.name === "onlineBookmarks" || route.name === "onlineManga" || route.name === "onlineChapter") {
     const sourceId = route.sourceId || state.online.currentSourceId;
     const source = state.online.sourceById.get(sourceId);
+    if (route.name === "onlineBookmarks") {
+      const kind = route.kind || "favorite";
+      const payload = state.online.bookmarksByKind.get(getOnlineBookmarkCacheKey(sourceId, kind));
+      mangaCountEl.textContent = payload?.items?.length || "-";
+      currentBookshelfEl.textContent = kind === "follow" ? "追漫" : "收藏";
+      latestUpdateEl.textContent = kind === "follow"
+        ? `${(payload?.items || []).filter((item) => item.hasUpdate).length} 部有更新`
+        : (source?.name || "在线收藏");
+      scanButton.disabled = true;
+      return;
+    }
     const hasQuery = Boolean(String(state.online.searchQuery || "").trim());
     const defaultFeed = state.online.defaultFeedsBySource.get(sourceId);
     const visibleItems = hasQuery
@@ -781,6 +859,64 @@ async function ensureOnlinePages(sourceId, chapterId, force = false) {
   return state.online.pagesByKey.get(cacheKey);
 }
 
+function getOnlineBookmarkCacheKey(sourceId, kind = "favorite") {
+  return `${sourceId || ""}::${kind === "follow" ? "follow" : "favorite"}`;
+}
+
+async function ensureOnlineBookmarks(sourceId, kind = "favorite", force = false) {
+  const normalizedKind = kind === "follow" ? "follow" : "favorite";
+  const cacheKey = getOnlineBookmarkCacheKey(sourceId, normalizedKind);
+  if (!force && state.online.bookmarksByKind.has(cacheKey)) {
+    return state.online.bookmarksByKind.get(cacheKey);
+  }
+  const payload = await fetchJSON(
+    `/api/online/${encodeURIComponent(sourceId)}/bookmarks?kind=${encodeURIComponent(normalizedKind)}`,
+  );
+  state.online.bookmarksByKind.set(cacheKey, payload);
+  return payload;
+}
+
+function getOnlineBookmarkState(sourceId, mangaId) {
+  const favoritePayload = state.online.bookmarksByKind.get(getOnlineBookmarkCacheKey(sourceId, "favorite"));
+  const followPayload = state.online.bookmarksByKind.get(getOnlineBookmarkCacheKey(sourceId, "follow"));
+  const favorite = (favoritePayload?.items || []).find((item) => item.id === mangaId);
+  const following = (followPayload?.items || []).find((item) => item.id === mangaId);
+  return {
+    favorite: Boolean(favorite || following?.favorite),
+    following: Boolean(following || favorite?.following),
+    hasUpdate: Boolean(following?.hasUpdate || favorite?.hasUpdate),
+  };
+}
+
+async function updateOnlineBookmark(sourceId, mangaId, patch) {
+  const response = await fetchJSON(
+    `/api/online/${encodeURIComponent(sourceId)}/manga/${encodeURIComponent(mangaId)}/bookmark`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+  state.online.bookmarksByKind.delete(getOnlineBookmarkCacheKey(sourceId, "favorite"));
+  state.online.bookmarksByKind.delete(getOnlineBookmarkCacheKey(sourceId, "follow"));
+  const mangaKey = getOnlineEntityKey(sourceId, mangaId);
+  if (state.online.mangaByKey.has(mangaKey)) {
+    const cached = state.online.mangaByKey.get(mangaKey);
+    state.online.mangaByKey.set(mangaKey, {
+      ...cached,
+      favorite: response.favorite,
+      following: response.following,
+      hasUpdate: response.hasUpdate,
+      latestChapterId: response.latestChapterId,
+    });
+  }
+  await Promise.all([
+    ensureOnlineBookmarks(sourceId, "favorite", true),
+    ensureOnlineBookmarks(sourceId, "follow", true),
+  ]);
+  return response;
+}
+
 async function ensureOnlineDownloads(force = false) {
   if (!force && state.online.downloads) {
     return state.online.downloads;
@@ -879,18 +1015,31 @@ function getFilteredDownloadJobs(items) {
 function renderDownloadJobCard(job) {
   const status = String(job.status || "").toLowerCase();
   const progress = getDownloadProgressPercent(job);
+  const mangaTitle = job.mangaTitle || job.mangaId;
+  const mangaRoute = routeForManga({ sourceId: job.sourceId, id: job.mangaId });
+  const coverURL = buildOnlineImageProxyURL(job.sourceId, job.coverUrl || "");
   return `
     <article class="download-job-card">
-      <div class="download-job-card__main">
-        <div class="download-job-card__heading">
-          <strong>${escapeHTML(job.mangaTitle || job.mangaId)}</strong>
-          <span>${escapeHTML(getOnlineSourceName(job.sourceId))}</span>
+      <div class="download-job-card__content">
+        <div class="download-job-card__cover" aria-hidden="true">
+          ${coverURL
+            ? `<img src="${escapeHTML(coverURL)}" alt="" loading="lazy" />`
+            : `<span>${escapeHTML(String(mangaTitle || "?").slice(0, 1).toUpperCase())}</span>`
+          }
         </div>
-        <p>${escapeHTML(getDownloadStatusText(job.status))} · ${job.donePages}/${job.totalPages || 0} 页 · ${job.doneChapters || 0}/${job.totalChapters || 0} 话</p>
-        <div class="download-job-card__progress">
-          <span style="width:${progress}%"></span>
+        <div class="download-job-card__main">
+          <div class="download-job-card__heading">
+            <a class="download-job-card__title" href="${escapeHTML(mangaRoute)}" data-route="${escapeHTML(mangaRoute)}">
+              ${escapeHTML(mangaTitle)}
+            </a>
+            <span>${escapeHTML(getOnlineSourceName(job.sourceId))}</span>
+          </div>
+          <p>${escapeHTML(getDownloadStatusText(job.status))} · ${job.donePages}/${job.totalPages || 0} 页 · ${job.doneChapters || 0}/${job.totalChapters || 0} 话</p>
+          <div class="download-job-card__progress">
+            <span style="width:${progress}%"></span>
+          </div>
+          ${job.errorMessage ? `<p class="download-job-card__error">${escapeHTML(job.errorMessage)}</p>` : ""}
         </div>
-        ${job.errorMessage ? `<p class="download-job-card__error">${escapeHTML(job.errorMessage)}</p>` : ""}
       </div>
       <div class="download-job-card__actions">
         ${status === "running" ? `<button class="ghost-button ghost-button--small" type="button" data-download-action="pause" data-download-job="${escapeHTML(job.id)}">暂停</button>` : ""}
@@ -1172,6 +1321,7 @@ async function refreshOnlineData(sourceId = state.online.currentSourceId || "18c
   state.online.mangaByKey.clear();
   state.online.chaptersByKey.clear();
   state.online.pagesByKey.clear();
+  state.online.bookmarksByKind.clear();
   state.online.downloads = null;
   await ensureOnlineSources(true);
   if (String(state.online.searchQuery || "").trim()) {
@@ -1180,6 +1330,10 @@ async function refreshOnlineData(sourceId = state.online.currentSourceId || "18c
     await refreshOnlineDefaultFeed(sourceId);
   }
   await ensureOnlineDownloads(true);
+  await Promise.all([
+    ensureOnlineBookmarks(sourceId, "favorite", true),
+    ensureOnlineBookmarks(sourceId, "follow", true),
+  ]);
 }
 
 function formatDownloadStatusLabel(status) {
@@ -1200,6 +1354,37 @@ function renderInlineTagList(tags, max = 4) {
     <div class="detail-tag-list">
       ${items.map((tag) => `<span class="manga-tag">${escapeHTML(tag)}</span>`).join("")}
     </div>
+  `;
+}
+
+function renderOnlineTileTagList(tags, max = 2) {
+  const items = (tags || [])
+    .map((tag) => String(typeof tag === "object" ? (tag?.name || tag?.label || "") : tag).trim())
+    .filter(Boolean)
+    .slice(0, max);
+  if (!items.length) {
+    return "";
+  }
+
+  return `
+    <div class="online-tag-list" aria-label="漫画标签">
+      ${items.map((tag) => `<span class="online-tag-list__item">${escapeHTML(tag)}</span>`).join("")}
+    </div>
+  `;
+}
+
+function renderOnlineAuthor(author, variant = "tile") {
+  const value = String(author || "").trim();
+  if (!value) {
+    return "";
+  }
+
+  const className = variant === "detail" ? "online-author online-author--detail" : "online-author";
+  return `
+    <p class="${className}" title="${escapeHTML(`作者：${value}`)}">
+      <span>作者</span>
+      <strong>${escapeHTML(value)}</strong>
+    </p>
   `;
 }
 
@@ -2301,6 +2486,30 @@ function bindMangaDetailActions(manga, chapters) {
       node.replaceWith(wrapper);
     });
 
+    appViewEl.querySelectorAll("[data-online-bookmark-toggle]").forEach((node) => {
+      node.addEventListener("click", async () => {
+        const kind = node.dataset.onlineBookmarkToggle || "favorite";
+        const isFavorite = kind === "favorite";
+        const nextValue = node.getAttribute("aria-pressed") !== "true";
+        node.disabled = true;
+        node.textContent = nextValue ? "保存中..." : "取消中...";
+        try {
+          const patch = isFavorite ? { favorite: nextValue } : { following: nextValue };
+          const nextState = await updateOnlineBookmark(manga.sourceId, manga.id, patch);
+          manga.favorite = nextState.favorite;
+          manga.following = nextState.following;
+          manga.hasUpdate = nextState.hasUpdate;
+          showFeedback(isFavorite
+            ? (nextValue ? "已收藏这部漫画。" : "已取消收藏。")
+            : (nextValue ? "已加入追漫，后续检测到新章节会提示更新。" : "已取消追漫。"));
+          renderMangaView(manga, chapters);
+        } catch (error) {
+          showFeedback(`保存失败: ${error.message}`, "error");
+          renderMangaView(manga, chapters);
+        }
+      });
+    });
+
     appViewEl.querySelector("[data-online-download-all]")?.addEventListener("click", async () => {
       const button = appViewEl.querySelector("[data-online-download-all]");
       if (button) {
@@ -2659,6 +2868,14 @@ function renderMangaView(manga, chapters) {
     getDownloadRequestKey(manga.sourceId, manga.id, [], "manga"),
   );
   const latestJobStatusText = latestJob ? getDownloadStatusText(latestJob.status) : "可下载";
+  const bookmarkState = isOnline
+    ? {
+        ...getOnlineBookmarkState(manga.sourceId, manga.id),
+        favorite: Boolean(manga.favorite || getOnlineBookmarkState(manga.sourceId, manga.id).favorite),
+        following: Boolean(manga.following || getOnlineBookmarkState(manga.sourceId, manga.id).following),
+        hasUpdate: Boolean(manga.hasUpdate || getOnlineBookmarkState(manga.sourceId, manga.id).hasUpdate),
+      }
+    : { favorite: false, following: false, hasUpdate: false };
 
   eyebrowEl.textContent = isOnline ? "在线漫画" : "Manga";
   refreshButton.hidden = false;
@@ -2717,9 +2934,10 @@ function renderMangaView(manga, chapters) {
                 ? `<span>${escapeHTML(onlineSourceName)}</span>`
                 : `<span>${manga.pageCount} 页</span>`
               }
-              <span>${isOnline && manga.author ? escapeHTML(manga.author) : formatUpdatedAt(manga.updatedAt)}</span>
+              ${isOnline ? "" : `<span>${formatUpdatedAt(manga.updatedAt)}</span>`}
               ${isOnline ? `<span>${latestJob ? escapeHTML(latestJobStatusText) : "可下载"}</span>` : ""}
             </div>
+            ${isOnline ? renderOnlineAuthor(manga.author, "detail") : ""}
             ${isOnline ? renderInlineTagList(manga.tags, 6) : ""}
             <div class="detail-card__actions">
               ${isOnline ? `
@@ -2748,6 +2966,22 @@ function renderMangaView(manga, chapters) {
                 ${secondaryReadLabel}
               </button>
               ${manga.sourceId ? `
+                <button
+                  class="ghost-button ${bookmarkState.favorite ? "is-active" : ""}"
+                  type="button"
+                  data-online-bookmark-toggle="favorite"
+                  aria-pressed="${bookmarkState.favorite ? "true" : "false"}"
+                >
+                  ${bookmarkState.favorite ? "已收藏" : "收藏"}
+                </button>
+                <button
+                  class="ghost-button ${bookmarkState.following ? "is-active" : ""}"
+                  type="button"
+                  data-online-bookmark-toggle="follow"
+                  aria-pressed="${bookmarkState.following ? "true" : "false"}"
+                >
+                  ${bookmarkState.following ? (bookmarkState.hasUpdate ? "追漫 · 有更新" : "已追漫") : "追漫"}
+                </button>
                 <button
                   class="ghost-button"
                   type="button"
@@ -3198,7 +3432,7 @@ function setupReaderInteractions(chapter, manga, chapters, pages) {
   if (homeReaderButton) {
     homeReaderButton.setAttribute("aria-label", "返回书架");
     homeReaderButton.setAttribute("title", "返回书架");
-    homeReaderButton.textContent = "⌂";
+    homeReaderButton.textContent = "?";
     homeReaderButton.addEventListener("click", () => {
       setRoute("#/");
     });
@@ -3503,15 +3737,34 @@ function renderOnlineLibraryView() {
             ${items.map((item) => `
               <article class="manga-tile manga-tile--online" data-route="${routeForManga(item)}">
                 <div class="manga-tile__cover">
-                  <img src="${escapeHTML(buildOnlineImageProxyURL(item.sourceId, item.coverUrl || ""))}" alt="${escapeHTML(item.title)}" loading="lazy" />
+                  ${renderOnlineCover(item)}
                 </div>
                 <div class="manga-tile__body">
                   <h3>${escapeHTML(item.title)}</h3>
-                  <p>${escapeHTML(item.author || getOnlineSourceName(item.sourceId) || "在线来源")}</p>
-                  <div class="manga-metrics manga-metrics--compact">
-                    ${(item.tags || []).slice(0, 2).map((tag) => `<span>${escapeHTML(tag)}</span>`).join("")}
-                  </div>
+                  ${renderOnlineAuthor(item.author)}
+                  ${renderOnlineTileTagList(item.tags)}
+                  ${getOnlineBookmarkState(item.sourceId, item.id).hasUpdate ? `<span class="manga-update-badge">有更新</span>` : ""}
                   <div class="manga-tile__quick-actions">
+                    <button
+                      class="ghost-button ghost-button--small ${getOnlineBookmarkState(item.sourceId, item.id).favorite ? "is-active" : ""}"
+                      type="button"
+                      data-online-card-bookmark="favorite"
+                      data-source-id="${escapeHTML(item.sourceId)}"
+                      data-manga-id="${escapeHTML(item.id)}"
+                      aria-pressed="${getOnlineBookmarkState(item.sourceId, item.id).favorite ? "true" : "false"}"
+                    >
+                      ${getOnlineBookmarkState(item.sourceId, item.id).favorite ? "已收藏" : "收藏"}
+                    </button>
+                    <button
+                      class="ghost-button ghost-button--small ${getOnlineBookmarkState(item.sourceId, item.id).following ? "is-active" : ""}"
+                      type="button"
+                      data-online-card-bookmark="follow"
+                      data-source-id="${escapeHTML(item.sourceId)}"
+                      data-manga-id="${escapeHTML(item.id)}"
+                      aria-pressed="${getOnlineBookmarkState(item.sourceId, item.id).following ? "true" : "false"}"
+                    >
+                      ${getOnlineBookmarkState(item.sourceId, item.id).following ? "已追漫" : "追漫"}
+                    </button>
                     <button
                       class="ghost-button ghost-button--small"
                       type="button"
@@ -3559,6 +3812,30 @@ function renderOnlineLibraryView() {
   `;
 
   bindViewActions();
+
+  appViewEl.querySelectorAll("[data-online-card-bookmark]").forEach((node) => {
+    node.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const kind = node.dataset.onlineCardBookmark || "favorite";
+      const sourceId = node.dataset.sourceId || state.online.currentSourceId;
+      const mangaId = node.dataset.mangaId || "";
+      const nextValue = node.getAttribute("aria-pressed") !== "true";
+      node.disabled = true;
+      node.textContent = nextValue ? "保存中..." : "取消中...";
+      try {
+        await updateOnlineBookmark(sourceId, mangaId, kind === "follow" ? { following: nextValue } : { favorite: nextValue });
+        showFeedback(kind === "follow"
+          ? (nextValue ? "已加入追漫。" : "已取消追漫。")
+          : (nextValue ? "已收藏。" : "已取消收藏。"));
+        updateHero();
+        renderOnlineLibraryView();
+      } catch (error) {
+        node.disabled = false;
+        node.textContent = kind === "follow" ? "追漫" : "收藏";
+        showFeedback(`保存失败: ${error.message}`, "error");
+      }
+    });
+  });
 
   appViewEl.querySelectorAll("[data-online-card-block]").forEach((node) => {
     node.addEventListener("click", async (event) => {
@@ -3652,6 +3929,115 @@ function renderOnlineLibraryView() {
       node.textContent = "加载更多";
       showFeedback(`加载更多失败: ${error.message}`, "error");
     }
+  });
+}
+
+function renderOnlineBookmarkView(kind = "favorite") {
+  disconnectReaderObserver();
+  cleanupToolbarExtras();
+  const normalizedKind = kind === "follow" ? "follow" : "favorite";
+  const isFollow = normalizedKind === "follow";
+  const sourceId = state.online.currentSourceId || "18comic";
+  const source = state.online.sourceById.get(sourceId);
+  const payload = state.online.bookmarksByKind.get(getOnlineBookmarkCacheKey(sourceId, normalizedKind));
+  const items = payload?.items || [];
+  const updatedItems = items.filter((item) => item.hasUpdate);
+
+  eyebrowEl.textContent = isFollow ? "追漫" : "收藏";
+  refreshButton.hidden = false;
+  refreshButton.textContent = "刷新";
+  refreshButton.dataset.mode = "refresh";
+  viewTitleEl.textContent = isFollow ? "追漫" : "收藏";
+  showFeedback(isFollow
+    ? `追漫列表共有 ${items.length} 部漫画，其中 ${updatedItems.length} 部提示有更新。`
+    : `收藏列表共有 ${items.length} 部漫画。`);
+
+  appViewEl.innerHTML = `
+    <section class="bookshelf-hero online-hero">
+      <div>
+        <p class="panel__eyebrow">${isFollow ? "Following" : "Favorites"}</p>
+        <h3>${isFollow ? "追漫" : "收藏"}</h3>
+        <p>${isFollow ? "这里显示你正在追的在线漫画。后台检测到同一漫画 ID 的章节数量增加时，会在这里提示有更新。" : "这里显示你收藏的在线漫画，适合临时保存想回看的作品。"}</p>
+      </div>
+      <div class="bookshelf-hero__stats">
+        <article class="bookshelf-stat">
+          <strong>${items.length}</strong>
+          <span>${isFollow ? "追漫" : "收藏"}</span>
+        </article>
+        <article class="bookshelf-stat">
+          <strong>${updatedItems.length}</strong>
+          <span>有更新</span>
+        </article>
+        <article class="bookshelf-stat">
+          <strong>${escapeHTML(source?.name || sourceId)}</strong>
+          <span>来源</span>
+        </article>
+      </div>
+    </section>
+
+    <section class="bookshelf-section">
+      <div class="bookshelf-section__header">
+        <div>
+          <p class="panel__eyebrow">Collection</p>
+          <h3>${isFollow ? "追漫列表" : "收藏列表"}</h3>
+        </div>
+        <span class="bookshelf-section__meta">${items.length} 部</span>
+      </div>
+      ${items.length
+        ? `<section class="library-grid">
+            ${items.map((item) => `
+              <article class="manga-tile manga-tile--online" data-route="${routeForManga(item)}">
+                <div class="manga-tile__cover">
+                  ${renderOnlineCover(item)}
+                </div>
+                <div class="manga-tile__body">
+                  <h3>${escapeHTML(item.title)}</h3>
+                  ${item.hasUpdate ? `<span class="manga-update-badge">有更新</span>` : ""}
+                  ${renderOnlineAuthor(item.author)}
+                  ${renderOnlineTileTagList(item.tags)}
+                  <div class="manga-metrics">
+                    <span>${item.chapterCount || 0} 话</span>
+                    <span>${item.following ? "已追漫" : "未追漫"}</span>
+                  </div>
+                  <div class="manga-tile__quick-actions">
+                    <button
+                      class="ghost-button ghost-button--small"
+                      type="button"
+                      data-online-card-bookmark="${isFollow ? "follow" : "favorite"}"
+                      data-source-id="${escapeHTML(item.sourceId)}"
+                      data-manga-id="${escapeHTML(item.id)}"
+                      aria-pressed="true"
+                    >
+                      ${isFollow ? "取消追漫" : "取消收藏"}
+                    </button>
+                  </div>
+                </div>
+              </article>
+            `).join("")}
+          </section>`
+        : `<article class="empty-card"><strong>${isFollow ? "还没有追漫。" : "还没有收藏。"}</strong><p>在在线漫画详情页点击“${isFollow ? "追漫" : "收藏"}”后，会出现在这里。</p></article>`
+      }
+    </section>
+  `;
+
+  bindViewActions();
+  appViewEl.querySelectorAll("[data-online-card-bookmark]").forEach((node) => {
+    node.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const sourceId = node.dataset.sourceId || state.online.currentSourceId;
+      const mangaId = node.dataset.mangaId || "";
+      node.disabled = true;
+      node.textContent = "保存中...";
+      try {
+        await updateOnlineBookmark(sourceId, mangaId, isFollow ? { following: false } : { favorite: false });
+        await ensureOnlineBookmarks(sourceId, normalizedKind, true);
+        updateHero();
+        renderOnlineBookmarkView(normalizedKind);
+      } catch (error) {
+        showFeedback(`保存失败: ${error.message}`, "error");
+        node.disabled = false;
+      }
+    });
   });
 }
 
@@ -3877,8 +4263,27 @@ async function renderCurrentRoute() {
         } else {
           await ensureOnlineDefaultFeed(route.sourceId, false);
         }
+        await Promise.all([
+          ensureOnlineBookmarks(route.sourceId, "favorite"),
+          ensureOnlineBookmarks(route.sourceId, "follow"),
+        ]);
         updateHero();
         renderOnlineLibraryView();
+        return;
+      }
+
+      if (route.name === "onlineBookmarks") {
+        state.online.currentSourceId = route.sourceId;
+        state.online.bookmarkKind = route.kind || "favorite";
+        rememberOnlineReturnRoute(routeForOnlineBookmarks(state.online.bookmarkKind, route.sourceId));
+        await Promise.all([
+          ensureHealth(),
+          ensureOnlineSources(),
+          ensureOnlineDownloads(),
+          ensureOnlineBookmarks(route.sourceId, route.kind || "favorite", true),
+        ]);
+        updateHero();
+        renderOnlineBookmarkView(route.kind || "favorite");
         return;
       }
 
@@ -3911,7 +4316,13 @@ async function renderCurrentRoute() {
     }
 
     if (route.name === "onlineManga") {
-      await Promise.all([ensureHealth(), ensureOnlineSources(), ensureOnlineDownloads()]);
+      await Promise.all([
+        ensureHealth(),
+        ensureOnlineSources(),
+        ensureOnlineDownloads(),
+        ensureOnlineBookmarks(route.sourceId, "favorite"),
+        ensureOnlineBookmarks(route.sourceId, "follow"),
+      ]);
       state.online.currentSourceId = route.sourceId;
       const [manga, chapters] = await Promise.all([
         ensureOnlineManga(route.sourceId, route.mangaId),
@@ -4013,8 +4424,18 @@ refreshButton.addEventListener("click", async () => {
   }
   if (String(getRoute().name || "").startsWith("online")) {
     showFeedback("正在刷新在线数据...");
-    await refreshOnlineData(getRoute().sourceId || state.online.currentSourceId || "18comic");
-    await renderCurrentRoute();
+    try {
+      await refreshOnlineData(getRoute().sourceId || state.online.currentSourceId || "18comic");
+      await renderCurrentRoute();
+    } catch (error) {
+      try {
+        await ensureOnlineSources(true);
+        renderOnlineLibraryView();
+      } catch (renderError) {
+        console.warn("failed to render online sources after refresh failure", renderError);
+      }
+      showFeedback(`刷新失败: ${error.message}`, "error");
+    }
     return;
   }
   if (getRoute().name === "library") {
@@ -4059,6 +4480,16 @@ onlineButton?.addEventListener("click", async () => {
   setRoute(routeForOnlineLibrary(state.online.currentSourceId || "18comic"));
 });
 
+favoritesButton?.addEventListener("click", async () => {
+  await ensureOnlineSources();
+  setRoute(routeForOnlineBookmarks("favorite", state.online.currentSourceId || "18comic"));
+});
+
+followingButton?.addEventListener("click", async () => {
+  await ensureOnlineSources();
+  setRoute(routeForOnlineBookmarks("follow", state.online.currentSourceId || "18comic"));
+});
+
 downloadsButton?.addEventListener("click", () => {
   setRoute("#/downloads");
 });
@@ -4077,4 +4508,5 @@ window.addEventListener("hashchange", () => {
 
 updateThemeToggle();
 renderCurrentRoute();
+
 

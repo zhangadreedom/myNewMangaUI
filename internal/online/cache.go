@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net/url"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ const (
 
 	defaultCacheRefreshPages        = 5
 	defaultCacheDetailHydrateBudget = 30
+	defaultCacheRefreshMinInterval  = 5 * time.Minute
+	defaultCacheRefreshMaxInterval  = 10 * time.Minute
 )
 
 type CacheService struct {
@@ -64,6 +67,9 @@ func (s *CacheService) UpsertManga(ctx context.Context, item Manga, status strin
 	}
 	if item.SourceURL == "" {
 		item.SourceURL = s.sourceMangaURL(item.SourceID, item.ID)
+	}
+	if item.SourceID == "ehentai" && !isUsableEHentaiImageURL(item.CoverURL) {
+		item.CoverURL = ""
 	}
 	if err := s.ensureSource(ctx, item.SourceID); err != nil {
 		return err
@@ -127,6 +133,11 @@ func (s *CacheService) UpsertChapters(ctx context.Context, sourceID string, mang
 		return err
 	}
 
+	previousCount, wasFollowing, err := s.followSnapshot(ctx, sourceID, mangaID)
+	if err != nil {
+		return err
+	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -179,15 +190,77 @@ func (s *CacheService) UpsertChapters(ctx context.Context, sourceID string, mang
 		return err
 	}
 
+	if wasFollowing {
+		latestChapterID := latestChapterID(chapters)
+		hasUpdate := 0
+		if previousCount > 0 && len(chapters) > previousCount {
+			hasUpdate = 1
+		}
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE online_manga_bookmark
+			SET
+				has_update = CASE WHEN ? = 1 THEN 1 ELSE has_update END,
+				last_known_chapter_count = CASE
+					WHEN ? > last_known_chapter_count THEN ?
+					ELSE last_known_chapter_count
+				END,
+				latest_chapter_id = CASE WHEN ? <> '' THEN ? ELSE latest_chapter_id END,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE source_id = ? AND external_id = ? AND followed_at IS NOT NULL
+		`, hasUpdate, len(chapters), len(chapters), latestChapterID, latestChapterID, sourceID, mangaID); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
 	return tx.Commit()
 }
 
+func (s *CacheService) followSnapshot(ctx context.Context, sourceID string, mangaID string) (int, bool, error) {
+	if s == nil || s.db == nil {
+		return 0, false, nil
+	}
+	var count int
+	var followedAt string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT last_known_chapter_count, COALESCE(followed_at, '')
+		FROM online_manga_bookmark
+		WHERE source_id = ? AND external_id = ?
+	`, strings.TrimSpace(sourceID), strings.TrimSpace(mangaID)).Scan(&count, &followedAt)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return count, strings.TrimSpace(followedAt) != "", nil
+}
+
+func latestChapterID(chapters []Chapter) string {
+	for i := len(chapters) - 1; i >= 0; i-- {
+		if id := strings.TrimSpace(chapters[i].ID); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
 func (s *CacheService) StartBackgroundRefresh(ctx context.Context, interval time.Duration) {
+	s.StartBackgroundRefreshWindow(ctx, interval, interval)
+}
+
+func (s *CacheService) StartBackgroundRefreshWindow(ctx context.Context, minInterval time.Duration, maxInterval time.Duration) {
 	if s == nil || s.online == nil || s.db == nil {
 		return
 	}
-	if interval <= 0 {
-		interval = 30 * time.Minute
+	if minInterval <= 0 {
+		minInterval = defaultCacheRefreshMinInterval
+	}
+	if maxInterval <= 0 {
+		maxInterval = defaultCacheRefreshMaxInterval
+	}
+	if maxInterval < minInterval {
+		minInterval, maxInterval = maxInterval, minInterval
 	}
 
 	go func() {
@@ -202,10 +275,17 @@ func (s *CacheService) StartBackgroundRefresh(ctx context.Context, interval time
 				if err := s.RefreshDefaultFeeds(ctx); err != nil && s.logger != nil {
 					s.logger.Warn("online cache refresh failed", "error", err)
 				}
-				timer.Reset(interval)
+				timer.Reset(randomRefreshDelay(minInterval, maxInterval))
 			}
 		}
 	}()
+}
+
+func randomRefreshDelay(minInterval time.Duration, maxInterval time.Duration) time.Duration {
+	if maxInterval <= minInterval {
+		return minInterval
+	}
+	return minInterval + time.Duration(rand.Int63n(int64(maxInterval-minInterval)+1))
 }
 
 func (s *CacheService) RefreshDefaultFeeds(ctx context.Context) error {
@@ -569,6 +649,9 @@ func scanCachedManga(row cacheScanTarget) (Manga, error) {
 	}
 	_ = json.Unmarshal([]byte(tagsRaw), &item.Tags)
 	item.Tags = normalizeCacheTags(item.Tags)
+	if item.SourceID == "ehentai" && !isUsableEHentaiImageURL(item.CoverURL) {
+		item.CoverURL = ""
+	}
 	return item, nil
 }
 

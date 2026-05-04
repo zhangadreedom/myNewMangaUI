@@ -52,6 +52,10 @@ type onlinePagesResponse struct {
 	Items []onlinesvc.Page `json:"items"`
 }
 
+type onlineBookmarksResponse struct {
+	Items []onlinesvc.Manga `json:"items"`
+}
+
 type onlineBlockResponse struct {
 	SourceID string `json:"sourceId"`
 	MangaID  string `json:"mangaId"`
@@ -68,6 +72,11 @@ type onlineSourceSettings struct {
 
 type onlineSettingsUpdateRequest struct {
 	BlacklistedTags []string `json:"blacklistedTags"`
+}
+
+type onlineBookmarkUpdateRequest struct {
+	Favorite  *bool `json:"favorite"`
+	Following *bool `json:"following"`
 }
 
 func (h *onlineHandler) listSources(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +108,35 @@ func (h *onlineHandler) listSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, onlineSettingsResponse{Items: items})
+}
+
+func (h *onlineHandler) listBookmarks(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		writeError(w, http.StatusInternalServerError, "database not initialized")
+		return
+	}
+
+	sourceID := strings.TrimSpace(chi.URLParam(r, "sourceID"))
+	kind := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("kind")))
+	if kind == "" {
+		kind = "favorite"
+	}
+	if kind != "favorite" && kind != "follow" {
+		writeError(w, http.StatusBadRequest, "bookmark kind must be favorite or follow")
+		return
+	}
+	if !h.hasSource(sourceID) {
+		writeError(w, http.StatusNotFound, "online source not found")
+		return
+	}
+
+	items, err := loadOnlineBookmarks(r.Context(), h.db, sourceID, kind)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load online bookmarks")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, onlineBookmarksResponse{Items: items})
 }
 
 func (h *onlineHandler) updateSettings(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +318,43 @@ func (h *onlineHandler) blockManga(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, onlineBlockResponse{SourceID: sourceID, MangaID: mangaID})
 }
 
+func (h *onlineHandler) updateBookmark(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		writeError(w, http.StatusInternalServerError, "database not initialized")
+		return
+	}
+
+	sourceID := strings.TrimSpace(chi.URLParam(r, "sourceID"))
+	mangaID := strings.TrimSpace(chi.URLParam(r, "mangaID"))
+	if sourceID == "" || mangaID == "" {
+		writeError(w, http.StatusBadRequest, "source id and manga id are required")
+		return
+	}
+	if !h.hasSource(sourceID) {
+		writeError(w, http.StatusNotFound, "online source not found")
+		return
+	}
+
+	var request onlineBookmarkUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid bookmark payload")
+		return
+	}
+	if request.Favorite == nil && request.Following == nil {
+		writeError(w, http.StatusBadRequest, "favorite or following is required")
+		return
+	}
+
+	_ = h.ensureOnlineMangaCached(r.Context(), sourceID, mangaID)
+	item, err := saveOnlineBookmark(r.Context(), h.db, sourceID, mangaID, request)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save online bookmark")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, item)
+}
+
 func (h *onlineHandler) getManga(w http.ResponseWriter, r *http.Request) {
 	if h.service == nil {
 		writeError(w, http.StatusNotImplemented, "online service not initialized")
@@ -300,6 +375,9 @@ func (h *onlineHandler) getManga(w http.ResponseWriter, r *http.Request) {
 	item, err := h.service.GetManga(r.Context(), sourceID, mangaID)
 	if err != nil {
 		if hasCache {
+			if h.db != nil {
+				cached = enrichOnlineMangaBookmark(r.Context(), h.db, cached)
+			}
 			writeJSON(w, http.StatusOK, cached)
 			return
 		}
@@ -315,6 +393,9 @@ func (h *onlineHandler) getManga(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.cache != nil {
 		_ = h.cache.UpsertManga(r.Context(), item, onlinesvc.CacheStatusDetail)
+	}
+	if h.db != nil {
+		item = enrichOnlineMangaBookmark(r.Context(), h.db, item)
 	}
 
 	writeJSON(w, http.StatusOK, item)
@@ -542,6 +623,262 @@ func loadOnlineBlockedMangaIDs(ctx context.Context, db *sql.DB, sourceID string)
 		return nil, err
 	}
 	return ids, nil
+}
+
+func (h *onlineHandler) ensureOnlineMangaCached(ctx context.Context, sourceID string, mangaID string) error {
+	if h.cache == nil {
+		return ensureOnlineSourceRow(ctx, h.db, h.sourceByID(sourceID))
+	}
+	if h.service != nil {
+		if item, err := h.service.GetManga(ctx, sourceID, mangaID); err == nil {
+			item.SourceID = sourceID
+			item.ID = mangaID
+			return h.cache.UpsertManga(ctx, item, onlinesvc.CacheStatusDetail)
+		}
+	}
+	if _, found, err := h.cache.CachedManga(ctx, sourceID, mangaID); err != nil {
+		return err
+	} else if found {
+		return nil
+	}
+	return ensureOnlineSourceRow(ctx, h.db, h.sourceByID(sourceID))
+}
+
+func (h *onlineHandler) sourceByID(sourceID string) onlinesvc.Source {
+	for _, source := range h.listAvailableSources() {
+		if source.ID == sourceID {
+			return source
+		}
+	}
+	return onlinesvc.Source{ID: sourceID, Name: sourceID}
+}
+
+func ensureOnlineSourceRow(ctx context.Context, db *sql.DB, source onlinesvc.Source) error {
+	if db == nil {
+		return nil
+	}
+	source.ID = strings.TrimSpace(source.ID)
+	if source.ID == "" {
+		return nil
+	}
+	if strings.TrimSpace(source.Name) == "" {
+		source.Name = source.ID
+	}
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO source(id, name, base_url, enabled, updated_at)
+		VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(id) DO UPDATE SET
+			name = excluded.name,
+			base_url = excluded.base_url,
+			enabled = excluded.enabled,
+			updated_at = CURRENT_TIMESTAMP
+	`, source.ID, source.Name, source.BaseURL, boolToOnlineInt(source.Enabled))
+	return err
+}
+
+func boolToOnlineInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func saveOnlineBookmark(ctx context.Context, db *sql.DB, sourceID string, mangaID string, request onlineBookmarkUpdateRequest) (onlinesvc.Manga, error) {
+	sourceID = strings.TrimSpace(sourceID)
+	mangaID = strings.TrimSpace(mangaID)
+
+	var favoriteAt sql.NullString
+	var followedAt sql.NullString
+	var hasUpdate int
+	var knownCount int
+	err := db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(favorite_at, ''),
+			COALESCE(followed_at, ''),
+			has_update,
+			last_known_chapter_count
+		FROM online_manga_bookmark
+		WHERE source_id = ? AND external_id = ?
+	`, sourceID, mangaID).Scan(&favoriteAt.String, &followedAt.String, &hasUpdate, &knownCount)
+	if err != nil && err != sql.ErrNoRows {
+		return onlinesvc.Manga{}, err
+	}
+	favoriteAt.Valid = strings.TrimSpace(favoriteAt.String) != ""
+	followedAt.Valid = strings.TrimSpace(followedAt.String) != ""
+
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	if request.Favorite != nil {
+		if *request.Favorite {
+			favoriteAt = sql.NullString{String: now, Valid: true}
+		} else {
+			favoriteAt = sql.NullString{}
+		}
+	}
+	if request.Following != nil {
+		if *request.Following {
+			followedAt = sql.NullString{String: now, Valid: true}
+			hasUpdate = 0
+			knownCount = currentOnlineChapterCount(ctx, db, sourceID, mangaID)
+		} else {
+			followedAt = sql.NullString{}
+			hasUpdate = 0
+		}
+	}
+	latestChapter := currentOnlineLatestChapterID(ctx, db, sourceID, mangaID)
+
+	_, err = db.ExecContext(ctx, `
+		INSERT INTO online_manga_bookmark(
+			source_id, external_id, favorite_at, followed_at, has_update,
+			last_known_chapter_count, latest_chapter_id, updated_at
+		) VALUES(?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(source_id, external_id) DO UPDATE SET
+			favorite_at = excluded.favorite_at,
+			followed_at = excluded.followed_at,
+			has_update = excluded.has_update,
+			last_known_chapter_count = excluded.last_known_chapter_count,
+			latest_chapter_id = excluded.latest_chapter_id,
+			updated_at = CURRENT_TIMESTAMP
+	`, sourceID, mangaID, nullableBookmarkTime(favoriteAt), nullableBookmarkTime(followedAt), hasUpdate, knownCount, latestChapter)
+	if err != nil {
+		return onlinesvc.Manga{}, err
+	}
+	if !favoriteAt.Valid && !followedAt.Valid {
+		if _, err := db.ExecContext(ctx, `
+			DELETE FROM online_manga_bookmark
+			WHERE source_id = ? AND external_id = ?
+		`, sourceID, mangaID); err != nil {
+			return onlinesvc.Manga{}, err
+		}
+	}
+	return loadOnlineBookmarkState(ctx, db, sourceID, mangaID)
+}
+
+func nullableBookmarkTime(value sql.NullString) any {
+	if value.Valid {
+		return value.String
+	}
+	return nil
+}
+
+func currentOnlineChapterCount(ctx context.Context, db *sql.DB, sourceID string, mangaID string) int {
+	var count int
+	_ = db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM online_chapter
+		WHERE source_id = ? AND external_manga_id = ?
+	`, sourceID, mangaID).Scan(&count)
+	if count > 0 {
+		return count
+	}
+	_ = db.QueryRowContext(ctx, `
+		SELECT chapter_count
+		FROM online_manga
+		WHERE source_id = ? AND external_id = ?
+	`, sourceID, mangaID).Scan(&count)
+	return count
+}
+
+func currentOnlineLatestChapterID(ctx context.Context, db *sql.DB, sourceID string, mangaID string) string {
+	var id string
+	_ = db.QueryRowContext(ctx, `
+		SELECT external_chapter_id
+		FROM online_chapter
+		WHERE source_id = ? AND external_manga_id = ?
+		ORDER BY chapter_order DESC, external_chapter_id DESC
+		LIMIT 1
+	`, sourceID, mangaID).Scan(&id)
+	return strings.TrimSpace(id)
+}
+
+func loadOnlineBookmarkState(ctx context.Context, db *sql.DB, sourceID string, mangaID string) (onlinesvc.Manga, error) {
+	var item onlinesvc.Manga
+	err := db.QueryRowContext(ctx, `
+		SELECT
+			source_id, external_id, COALESCE(favorite_at, '') <> '', COALESCE(followed_at, '') <> '',
+			has_update <> 0, latest_chapter_id
+		FROM online_manga_bookmark
+		WHERE source_id = ? AND external_id = ?
+	`, sourceID, mangaID).Scan(&item.SourceID, &item.ID, &item.Favorite, &item.Following, &item.HasUpdate, &item.LatestChapterID)
+	if err == sql.ErrNoRows {
+		item.SourceID = sourceID
+		item.ID = mangaID
+		return item, nil
+	}
+	return item, err
+}
+
+func enrichOnlineMangaBookmark(ctx context.Context, db *sql.DB, item onlinesvc.Manga) onlinesvc.Manga {
+	state, err := loadOnlineBookmarkState(ctx, db, item.SourceID, item.ID)
+	if err != nil {
+		return item
+	}
+	item.Favorite = state.Favorite
+	item.Following = state.Following
+	item.HasUpdate = state.HasUpdate
+	item.LatestChapterID = state.LatestChapterID
+	return item
+}
+
+func loadOnlineBookmarks(ctx context.Context, db *sql.DB, sourceID string, kind string) ([]onlinesvc.Manga, error) {
+	condition := "b.favorite_at IS NOT NULL"
+	order := "b.favorite_at DESC, om.last_seen_at DESC"
+	if kind == "follow" {
+		condition = "b.followed_at IS NOT NULL"
+		order = "b.has_update DESC, b.updated_at DESC, om.last_seen_at DESC"
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT
+			b.source_id, b.external_id, COALESCE(om.title, ''), COALESCE(om.cover_url, ''),
+			COALESCE(om.source_url, ''), COALESCE(om.author, ''),
+			COALESCE(om.tags_json, '[]'), COALESCE(om.chapter_count, 0), COALESCE(om.page_count, 0), COALESCE(om.cache_status, ''),
+			COALESCE(om.last_seen_at, ''), COALESCE(om.last_fetched_at, ''), COALESCE(om.detail_checked_at, ''),
+			b.favorite_at IS NOT NULL, b.followed_at IS NOT NULL, b.has_update <> 0, b.latest_chapter_id
+		FROM online_manga_bookmark b
+		LEFT JOIN online_manga om ON om.source_id = b.source_id AND om.external_id = b.external_id
+		WHERE b.source_id = ? AND `+condition+`
+		ORDER BY `+order+`
+	`, strings.TrimSpace(sourceID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]onlinesvc.Manga, 0)
+	for rows.Next() {
+		var item onlinesvc.Manga
+		var tagsRaw string
+		if err := rows.Scan(
+			&item.SourceID,
+			&item.ID,
+			&item.Title,
+			&item.CoverURL,
+			&item.SourceURL,
+			&item.Author,
+			&tagsRaw,
+			&item.ChapterCount,
+			&item.PageCount,
+			&item.CacheStatus,
+			&item.LastSeenAt,
+			&item.LastFetchedAt,
+			&item.DetailCheckedAt,
+			&item.Favorite,
+			&item.Following,
+			&item.HasUpdate,
+			&item.LatestChapterID,
+		); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal([]byte(tagsRaw), &item.Tags)
+		if strings.TrimSpace(item.Title) == "" {
+			item.Title = "Album " + item.ID
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func loadOnlineSourceSettings(ctx context.Context, db *sql.DB, sourceID string) (onlineSourceSettings, error) {

@@ -18,6 +18,18 @@ func NewDefaultService(cfg config.OnlineConfig) (*Service, error) {
 				return nil, fmt.Errorf("create 18comic provider: %w", err)
 			}
 			providers = append(providers, provider)
+		case "ehentai":
+			provider, err := NewEHentaiProvider(cfg, source)
+			if err != nil {
+				return nil, fmt.Errorf("create ehentai provider: %w", err)
+			}
+			providers = append(providers, provider)
+		case "pica":
+			provider, err := NewPicaProvider(cfg, source)
+			if err != nil {
+				return nil, fmt.Errorf("create pica provider: %w", err)
+			}
+			providers = append(providers, provider)
 		}
 	}
 

@@ -31,6 +31,10 @@ type Manga struct {
 	LastSeenAt      string   `json:"lastSeenAt,omitempty"`
 	LastFetchedAt   string   `json:"lastFetchedAt,omitempty"`
 	DetailCheckedAt string   `json:"detailCheckedAt,omitempty"`
+	Favorite        bool     `json:"favorite,omitempty"`
+	Following       bool     `json:"following,omitempty"`
+	HasUpdate       bool     `json:"hasUpdate,omitempty"`
+	LatestChapterID string   `json:"latestChapterId,omitempty"`
 }
 
 type Chapter struct {
@@ -80,6 +84,7 @@ type DownloadJob struct {
 	SourceID      string            `json:"sourceId"`
 	MangaID       string            `json:"mangaId"`
 	MangaTitle    string            `json:"mangaTitle"`
+	CoverURL      string            `json:"coverUrl,omitempty"`
 	Status        DownloadJobStatus `json:"status"`
 	Mode          string            `json:"mode"`
 	TotalChapters int               `json:"totalChapters"`

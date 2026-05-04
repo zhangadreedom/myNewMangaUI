@@ -180,12 +180,16 @@ func (s *Service) ListJobs(ctx context.Context, limit int) ([]onlinesvc.Download
 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT
-			id, source_id, external_manga_id, manga_title, status, mode,
-			total_chapters, done_chapters, total_pages, done_pages, failed_pages,
-			error_message, created_at, updated_at,
-			COALESCE(started_at, ''), COALESCE(finished_at, '')
-		FROM download_job
-		ORDER BY created_at DESC, id DESC
+			dj.id, dj.source_id, dj.external_manga_id, dj.manga_title,
+			COALESCE(om.cover_url, ''),
+			dj.status, dj.mode,
+			dj.total_chapters, dj.done_chapters, dj.total_pages, dj.done_pages, dj.failed_pages,
+			dj.error_message, dj.created_at, dj.updated_at,
+			COALESCE(dj.started_at, ''), COALESCE(dj.finished_at, '')
+		FROM download_job dj
+		LEFT JOIN online_manga om
+			ON om.source_id = dj.source_id AND om.external_id = dj.external_manga_id
+		ORDER BY dj.created_at DESC, dj.id DESC
 		LIMIT ?
 	`, limit)
 	if err != nil {
@@ -214,12 +218,16 @@ func (s *Service) GetJob(ctx context.Context, jobID string) (onlinesvc.DownloadJ
 
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
-			id, source_id, external_manga_id, manga_title, status, mode,
-			total_chapters, done_chapters, total_pages, done_pages, failed_pages,
-			error_message, created_at, updated_at,
-			COALESCE(started_at, ''), COALESCE(finished_at, '')
-		FROM download_job
-		WHERE id = ?
+			dj.id, dj.source_id, dj.external_manga_id, dj.manga_title,
+			COALESCE(om.cover_url, ''),
+			dj.status, dj.mode,
+			dj.total_chapters, dj.done_chapters, dj.total_pages, dj.done_pages, dj.failed_pages,
+			dj.error_message, dj.created_at, dj.updated_at,
+			COALESCE(dj.started_at, ''), COALESCE(dj.finished_at, '')
+		FROM download_job dj
+		LEFT JOIN online_manga om
+			ON om.source_id = dj.source_id AND om.external_id = dj.external_manga_id
+		WHERE dj.id = ?
 	`, jobID)
 	job, err := scanDownloadJob(row)
 	if err != nil {
@@ -1120,6 +1128,7 @@ func scanDownloadJob(row scanTarget) (onlinesvc.DownloadJob, error) {
 		&job.SourceID,
 		&job.MangaID,
 		&job.MangaTitle,
+		&job.CoverURL,
 		&job.Status,
 		&job.Mode,
 		&job.TotalChapters,
